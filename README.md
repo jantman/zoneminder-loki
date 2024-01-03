@@ -22,12 +22,13 @@ docker run \
 ### Environment Variables
 
 * `LOKI_URL` (**required**) - Loki URL to ship logs to; e.g. `http://my-loki-instance/loki/api/v1/push`
+* `LOG_HOST` (**required**) - Value to specify for the `host` label on log messages
 * `ZM_DB_HOST` (**required**) - ZoneMinder MySQL database hostname (or IP address)
 * `ZM_DB_USER` (**required**) - ZoneMinder MySQL database username
 * `ZM_DB_PASS` (**required**) - ZoneMinder MySQL database password
 * `ZM_DB_NAME` (**required**) - ZoneMinder MySQL database name
 * `POLL_SECONDS` (_optional_) - Integer number of seconds for how often to poll MySQL for log messages; default 10
-* `BACKFILL_MINUTES` (_optional_) - If the pointer file does not exist, how many minutes worth of logs to backfill into Loki; default 60
+* `BACKFILL_MINUTES` (_optional_) - If the pointer file does not exist, how many minutes worth of logs to backfill into Loki; default 120
 * `POINTER_PATH` (_optional_) - Path to the pointer position file; default `/pointer.txt`
 
 ## Debugging

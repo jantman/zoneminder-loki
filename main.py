@@ -30,13 +30,68 @@ import os
 import argparse
 import logging
 from time import sleep, time
+from typing import List, Dict
+from collections import defaultdict
+import json
 
 import pymysql
 import pymysql.cursors
+import requests
 
 FORMAT = "[%(asctime)s %(levelname)s] %(message)s"
 logging.basicConfig(level=logging.WARNING, format=FORMAT)
 logger = logging.getLogger()
+
+
+# suppress annoying logging
+for lname in ['urllib3']:
+    lgr = logging.getLogger(lname)
+    lgr.setLevel(logging.WARNING)
+    lgr.propagate = True
+
+
+def zm_level_name(level: int) -> str:
+    """
+    ZoneMinder logging levels:
+    https://github.com/ZoneMinder/zoneminder/blob/master/scripts/ZoneMinder/lib/ZoneMinder/Logger.pm#L109-L126
+    use constant {
+      DEBUG9 => 9,
+      DEBUG8 => 8,
+      DEBUG7 => 7,
+      DEBUG6 => 6,
+      DEBUG5 => 5,
+      DEBUG4 => 4,
+      DEBUG3 => 3,
+      DEBUG2 => 2,
+      DEBUG1 => 1,
+      DEBUG => 1,
+      INFO => 0,
+      WARNING => -1,
+      ERROR => -2,
+      FATAL => -3,
+      PANIC => -4,
+      NOLOG => -5
+    };
+    """
+    name: str
+    match level:
+        case -5:
+            name = 'nolog'
+        case -4:
+            name = 'panic'
+        case -3:
+            name = 'fatal'
+        case -2:
+            name = 'error'
+        case -1:
+            name = 'warning'
+        case 0:
+            name = 'info'
+        case _:
+            name = 'unknown'
+    if level >= 1:
+        name = 'debug'
+    return name
 
 
 class ZmLokiShipper:
@@ -46,10 +101,11 @@ class ZmLokiShipper:
         db_user: str = self._env_or_err('ZM_DB_USER')
         db_pass: str = self._env_or_err('ZM_DB_PASS')
         db_name: str = self._env_or_err('ZM_DB_NAME')
+        log_host: str = self._env_or_err('LOG_HOST')
         self._loki_url: str = self._env_or_err('LOKI_URL')
         self._poll_interval: int = int(os.environ.get('POLL_SECONDS', '10'))
         self._backfill_minutes: int = int(
-            os.environ.get('BACKFILL_MINUTES', '60')
+            os.environ.get('BACKFILL_MINUTES', '120')
         )
         self._pointer_path: str = os.environ.get(
             'POINTER_PATH', '/pointer.txt'
@@ -65,6 +121,12 @@ class ZmLokiShipper:
             charset='utf8mb4', cursorclass=pymysql.cursors.DictCursor
         )
         logger.debug('Connected to MySQL')
+        self._batch_size: int = 1  # just in case we want to tune in future
+        self._session: requests.Session = requests.Session()
+        self._labels: Dict[str, str] = {
+            'host': log_host, 'job': 'zoneminder-loki'
+        }
+        logger.debug('Common labels: %s', self._labels)
 
     def _env_or_err(self, name: str) -> str:
         s: str = os.environ.get(name)
@@ -89,6 +151,16 @@ class ZmLokiShipper:
         with open(self._pointer_path, 'w') as fh:
             fh.write(str(self._pointer))
 
+    def _loki_post(self, data: dict):
+        logger.debug('POST to Loki with data: %s', data)
+        r: requests.Response = self._session.post(
+            url=self._loki_url, json=data
+        )
+        logger.debug(
+            'Loki responded HTTP %d: %s', r.status_code, r.content
+        )
+        r.raise_for_status()
+
     def run(self):
         with self.conn:
             if os.path.exists(self._pointer_path):
@@ -99,29 +171,34 @@ class ZmLokiShipper:
                 logger.info('Polling for Logs with Id > %d', self._pointer)
             else:
                 self._backfill()
+            cursor: pymysql.cursors.DictCursor
             with self.conn.cursor() as cursor:
-                logger.info('Entering polling loop...')
+                logger.info(
+                    'Entering polling loop; reading from DB in batches of '
+                    '%d rows', self._batch_size
+                )
                 count: int
+                rows: List[dict]
                 while True:
                     count = 0
                     sql = (f'SELECT * FROM Logs WHERE Id > {self._pointer} '
                            f'ORDER BY Id ASC;')
                     logger.debug('Execute: %s', sql)
-                    cursor.execute(sql)
-                    while (row := cursor.fetchone()) is not None:
-                        self._handle_row(row)
+                    rowcount = cursor.execute(sql)
+                    logger.debug('Query matched %d rows', rowcount)
+                    while rows := cursor.fetchmany(self._batch_size):
+                        self._handle_rows(rows)
                         count += 1
                     if count > 0:
                         logger.info('Shipped %d log messages', count)
                     logger.debug('Sleeping %d seconds', self._poll_interval)
                     sleep(self._poll_interval)
 
-    def _handle_row(self, row: dict):
+    def _handle_rows(self, rows: List[dict]):
         """
         Handle one log message from the DB.
 
-        Example:
-
+        Example DB entry:
         {
             'Id': 221456,
             'TimeKey': Decimal('1703574639.334704'),
@@ -135,7 +212,45 @@ class ZmLokiShipper:
             'Line': 1680
         }
         """
-        logger.error('ROW: %s', row)
+        streams: Dict[tuple, list] = defaultdict(list)
+        for row in rows:
+            labels: tuple = (
+                ('component', str(row['Component'])),
+                ('server_id', str(row['ServerId'])),
+                ('PID', str(row['Pid'])),
+                ('level', zm_level_name(row['Level']))
+            )
+            """
+            streams[labels].append([
+                # Loki needs a nanoseconds timestamp
+                str(int(float(row['TimeKey']) * 1000000.0)),
+                row['Message'],
+                {
+                    'log_id': str(row['Id']),
+                    'file': str(row['File']),
+                    'line': str(row['Line'])
+                }
+            ])
+            """
+            streams[labels].append([
+                # Loki needs a nanoseconds timestamp
+                str(float(row['TimeKey'])),
+                row['Message']
+            ])
+            """
+            Ok, having serious issues here...
+            POST to Loki with data: {'streams': [{'stream': {'component': 'zmc_m2', 'server_id': '0', 'PID': '79', 'level': 'info', 'host': 'testing', 'job': 'zoneminder-loki'}, 'values': [['1703574639.334704', 'Office: 377000 - Capturing at 9.97 fps, capturing bandwidth 165274bytes/sec Analysing at 0.00 fps']]}]}
+            Loki responded HTTP 400: b'loghttp.PushRequest.Streams: []*loghttp.Stream: unmarshalerDecoder: Value looks like Number/Boolean/None, but can\'t find its end: \',\' or \'}\' symbol, error found in #10 byte of ...|00 fps"]]}]}|..., bigger context ...|andwidth 165274bytes/sec Analysing at 0.00 fps"]]}]}|...\n'
+            """
+        data: dict = {'streams': []}
+        for keys, vals in streams.items():
+            data['streams'].append({
+                'stream': dict(keys) | self._labels,
+                'values': vals
+            })
+        self._loki_post(data)
+        self._pointer = max([x['Id'] for x in rows])
+        self._write_pointer()
         raise NotImplementedError()
 
     def _backfill(self):
@@ -145,6 +260,7 @@ class ZmLokiShipper:
             threshold, self._backfill_minutes
         )
         count: int = 0
+        cursor: pymysql.cursors.DictCursor
         with self.conn.cursor() as cursor:
             # first set the pointer; if we backfill zero rows, we want the
             # pointer to still be accurate
@@ -158,9 +274,11 @@ class ZmLokiShipper:
             sql = (f'SELECT * FROM Logs WHERE TimeKey >= {threshold} '
                    f'ORDER BY Id ASC;')
             logger.debug('Execute: %s', sql)
-            cursor.execute(sql)
-            while (row := cursor.fetchone()) is not None:
-                self._handle_row(row)
+            rowcount = cursor.execute(sql)
+            logger.debug('Query matched %d rows', rowcount)
+            rows: List[dict]
+            while rows := cursor.fetchmany(self._batch_size):
+                self._handle_rows(rows)
                 count += 1
         logger.info('Done backfilling %d older log messages', count)
 
