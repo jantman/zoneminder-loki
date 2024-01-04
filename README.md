@@ -16,6 +16,10 @@ This is really only intended to be run in Docker; if you need to run it locally,
 
 ```
 docker run \
+    -e LOG_HOST="$(hostname)" \
+    -e LOKI_URL=http://myloki:3100/loki/api/v1/push \
+    -e ZM_DB_HOST ZM_DB_USER ZM_DB_PASS ZM_DB_NAME \
+    -v /opt/zm-loki-pointer.txt:/pointer.txt \
     jantman/zoneminder-loki:latest
 ```
 

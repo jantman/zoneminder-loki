@@ -159,7 +159,7 @@ class ZmLokiShipper:
         logger.debug(
             'Loki responded HTTP %d: %s', r.status_code, r.content
         )
-        r.raise_for_status()
+        assert r.status_code == 204
 
     def run(self):
         with self.conn:
@@ -218,30 +218,15 @@ class ZmLokiShipper:
                 ('component', str(row['Component'])),
                 ('server_id', str(row['ServerId'])),
                 ('PID', str(row['Pid'])),
-                ('level', zm_level_name(row['Level']))
+                ('level', zm_level_name(row['Level'])),
+                ('file', str(row['File'])),
+                ('line', str(row['Line'])),
             )
-            """
             streams[labels].append([
                 # Loki needs a nanoseconds timestamp
-                str(int(float(row['TimeKey']) * 1000000.0)),
-                row['Message'],
-                {
-                    'log_id': str(row['Id']),
-                    'file': str(row['File']),
-                    'line': str(row['Line'])
-                }
-            ])
-            """
-            streams[labels].append([
-                # Loki needs a nanoseconds timestamp
-                str(float(row['TimeKey'])),
+                str(int(row['TimeKey']) * 1000000000),
                 row['Message']
             ])
-            """
-            Ok, having serious issues here...
-            POST to Loki with data: {'streams': [{'stream': {'component': 'zmc_m2', 'server_id': '0', 'PID': '79', 'level': 'info', 'host': 'testing', 'job': 'zoneminder-loki'}, 'values': [['1703574639.334704', 'Office: 377000 - Capturing at 9.97 fps, capturing bandwidth 165274bytes/sec Analysing at 0.00 fps']]}]}
-            Loki responded HTTP 400: b'loghttp.PushRequest.Streams: []*loghttp.Stream: unmarshalerDecoder: Value looks like Number/Boolean/None, but can\'t find its end: \',\' or \'}\' symbol, error found in #10 byte of ...|00 fps"]]}]}|..., bigger context ...|andwidth 165274bytes/sec Analysing at 0.00 fps"]]}]}|...\n'
-            """
         data: dict = {'streams': []}
         for keys, vals in streams.items():
             data['streams'].append({
@@ -251,7 +236,6 @@ class ZmLokiShipper:
         self._loki_post(data)
         self._pointer = max([x['Id'] for x in rows])
         self._write_pointer()
-        raise NotImplementedError()
 
     def _backfill(self):
         threshold = int(time() - (self._backfill_minutes * 60))
@@ -264,7 +248,7 @@ class ZmLokiShipper:
         with self.conn.cursor() as cursor:
             # first set the pointer; if we backfill zero rows, we want the
             # pointer to still be accurate
-            sql = 'SELECT Id FROM Logs ORDER BY Id ASC LIMIT 1;'
+            sql = 'SELECT Id FROM Logs ORDER BY Id DESC LIMIT 1;'
             cursor.execute(sql)
             row = cursor.fetchone()
             logger.info(
