@@ -30,9 +30,8 @@ import os
 import argparse
 import logging
 from time import sleep, time
-from typing import List, Dict
+from typing import List, Dict, Optional
 from collections import defaultdict
-import json
 
 import pymysql
 import pymysql.cursors
@@ -136,12 +135,19 @@ class ZmLokiShipper:
             )
         return s
 
-    def _read_pointer(self) -> int:
+    def _read_pointer(self) -> Optional[int]:
         logger.debug('Reading pointer from: %s', self._pointer_path)
-        with open(self._pointer_path, 'r') as fh:
-            pointer = fh.read().strip()
-        logger.debug('Pointer value: %s', pointer)
-        return int(pointer)
+        try:
+            with open(self._pointer_path, 'r') as fh:
+                pointer = fh.read().strip()
+            logger.debug('Pointer value: %s', pointer)
+            return int(pointer)
+        except Exception as ex:
+            logger.error(
+                'Unable to read pointer from %s: %s', self._pointer_path, ex,
+                exc_info=True
+            )
+            return None
 
     def _write_pointer(self):
         logger.debug(
@@ -163,8 +169,8 @@ class ZmLokiShipper:
 
     def run(self):
         with self.conn:
-            if os.path.exists(self._pointer_path):
-                self._pointer = self._read_pointer()
+            if pointer := self._read_pointer():
+                self._pointer = pointer
                 # make sure we can write the file; if we can't, we want to error
                 # now, not after we have an update to write...
                 self._write_pointer()
