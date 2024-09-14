@@ -165,7 +165,12 @@ class ZmLokiShipper:
         logger.debug(
             'Loki responded HTTP %d: %s', r.status_code, r.content
         )
-        assert r.status_code == 204
+        if r.status_code < 200 or r.status_code > 299:
+            logger.critical(
+                'Loki POST to %s returned HTTP %d (%s); headers=%s; post data=%s',
+                self._loki_url, r.status_code, r.content, r.headers, data
+            )
+            r.raise_for_status()
 
     def run(self):
         with self.conn:
