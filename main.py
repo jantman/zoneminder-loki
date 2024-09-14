@@ -32,7 +32,6 @@ import logging
 from time import sleep, time
 from typing import List, Dict, Optional
 from collections import defaultdict
-import json
 
 import pymysql
 import pymysql.cursors
@@ -241,11 +240,11 @@ class ZmLokiShipper:
                 # Loki needs a nanoseconds timestamp
                 str(int(row['TimeKey']) * 1000000000),
                 row['Message'],
-                json.dumps({
+                {
                     'PID': str(row['Pid']),
                     'line': str(row['Line']),
                     'file': str(row['File']),
-                })
+                }
             ])
         data: dict = {'streams': []}
         for keys, vals in streams.items():
