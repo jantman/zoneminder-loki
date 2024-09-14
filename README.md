@@ -10,6 +10,10 @@ Docker image to ship ZoneMinder logs to Loki
 
 This is a very simple daemon that polls [ZoneMinder](https://zoneminder.com/)'s MySQL database for new log messages (in the ZoneMinder `Logs` table, the same one that drives the "Log" section of the UI) every N seconds (default 10) and ships them to [Loki](https://grafana.com/oss/loki/). This is intended as a way to get ZM's logs out of their walled-garden database table and into (1) the same place _all_ of your other logs are, and (2) somewhere that can alert on problems in a meaningful way.
 
+## Loki Metadata
+
+**NOTE:** This project requires Loki to have [structured metadata](https://grafana.com/docs/loki/latest/get-started/labels/structured-metadata/) support enabled.
+
 ## Usage
 
 This is really only intended to be run in Docker; if you need to run it locally, make your environment like the Docker container.

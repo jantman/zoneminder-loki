@@ -234,15 +234,17 @@ class ZmLokiShipper:
             labels: tuple = (
                 ('component', str(row['Component'])),
                 ('server_id', str(row['ServerId'])),
-                ('PID', str(row['Pid'])),
                 ('level', zm_level_name(row['Level'])),
-                ('file', str(row['File'])),
-                ('line', str(row['Line'])),
             )
             streams[labels].append([
                 # Loki needs a nanoseconds timestamp
                 str(int(row['TimeKey']) * 1000000000),
-                row['Message']
+                row['Message'],
+                json.dumps({
+                    'PID': str(row['Pid']),
+                    'line': str(row['Line']),
+                    'file': str(row['File']),
+                })
             ])
         data: dict = {'streams': []}
         for keys, vals in streams.items():
