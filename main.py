@@ -165,6 +165,12 @@ class ZmLokiShipper:
         logger.debug(
             'Loki responded HTTP %d: %s', r.status_code, r.content
         )
+        if r.status_code == 400 and 'has timestamp too old' in r.text:
+            logger.warning(
+                'Loki POST returned HTTP 400: %s; skipping this log',
+                r.text
+            )
+            return
         if r.status_code < 200 or r.status_code > 299:
             logger.critical(
                 'Loki POST to %s returned HTTP %d (%s); headers=%s; post data=%s',
