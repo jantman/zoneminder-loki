@@ -6,13 +6,17 @@ Docker image to ship ZoneMinder logs to Loki
 
 **IMPORTANT:** This is a personal project only. PRs are accepted, but this is not supported and "issues" will likely not be fixed or responded to. This is only for people who understand the details of everything invovled.
 
+**NOTE:** This project is intended for use with Loki 3.0+ with [structured metadata](https://grafana.com/docs/loki/latest/get-started/labels/structured-metadata/) enabled (`allow_structured_metadata: true` in `limits_config`). If you are running an older version of Loki or do not have structured metadata enabled, set the `STRUCTURED_METADATA=false` environment variable.
+
 ## Description
 
 This is a very simple daemon that polls [ZoneMinder](https://zoneminder.com/)'s MySQL database for new log messages (in the ZoneMinder `Logs` table, the same one that drives the "Log" section of the UI) every N seconds (default 10) and ships them to [Loki](https://grafana.com/oss/loki/). This is intended as a way to get ZM's logs out of their walled-garden database table and into (1) the same place _all_ of your other logs are, and (2) somewhere that can alert on problems in a meaningful way.
 
 ## Loki Metadata
 
-**NOTE:** This project requires Loki to have [structured metadata](https://grafana.com/docs/loki/latest/get-started/labels/structured-metadata/) support enabled.
+By default, `PID`, `file`, and `line` are sent as Loki [structured metadata](https://grafana.com/docs/loki/latest/get-started/labels/structured-metadata/) (requires Loki 3.0+ with `allow_structured_metadata: true` in `limits_config`).
+
+Set `STRUCTURED_METADATA=false` to send `PID`, `file`, and `line` as regular Loki labels instead, for compatibility with older Loki versions.
 
 ## Usage
 
@@ -38,6 +42,7 @@ docker run \
 * `POLL_SECONDS` (_optional_) - Integer number of seconds for how often to poll MySQL for log messages; default 10
 * `BACKFILL_MINUTES` (_optional_) - If the pointer file does not exist, how many minutes worth of logs to backfill into Loki; default 120
 * `POINTER_PATH` (_optional_) - Path to the pointer position file; default `/pointer.txt`
+* `STRUCTURED_METADATA` (_optional_) - Send PID/file/line as Loki structured metadata (default `true`); set to `false` to send them as labels instead, for Loki versions older than 3.0
 
 ## Debugging
 

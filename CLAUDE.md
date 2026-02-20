@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Docker daemon that polls ZoneMinder's MySQL `Logs` table and ships log messages to Grafana Loki. The entire application is a single Python file (`main.py`, ~330 lines). Requires Loki [structured metadata](https://grafana.com/docs/loki/latest/get-started/labels/structured-metadata/) support enabled.
+Docker daemon that polls ZoneMinder's MySQL `Logs` table and ships log messages to Grafana Loki. The entire application is a single Python file (`main.py`, ~330 lines). Optionally supports Loki [structured metadata](https://grafana.com/docs/loki/latest/get-started/labels/structured-metadata/) (requires Loki 3.0+ with `allow_structured_metadata: true`).
 
 ## Development Setup
 
@@ -18,7 +18,7 @@ Dependencies: `PyMySQL`, `requests` (unpinned in requirements.txt).
 
 ## Running
 
-Intended to run in Docker. Requires these environment variables: `LOKI_URL`, `LOG_HOST`, `ZM_DB_HOST`, `ZM_DB_USER`, `ZM_DB_PASS`, `ZM_DB_NAME`. Optional: `POLL_SECONDS` (default 10), `BACKFILL_MINUTES` (default 120), `POINTER_PATH` (default `/pointer.txt`). Use `-v` flag for debug logging.
+Intended to run in Docker. Requires these environment variables: `LOKI_URL`, `LOG_HOST`, `ZM_DB_HOST`, `ZM_DB_USER`, `ZM_DB_PASS`, `ZM_DB_NAME`. Optional: `POLL_SECONDS` (default 10), `BACKFILL_MINUTES` (default 120), `POINTER_PATH` (default `/pointer.txt`), `STRUCTURED_METADATA` (default true; set to `false` for Loki < 3.0). Use `-v` flag for debug logging.
 
 ## Architecture
 
@@ -29,7 +29,7 @@ Intended to run in Docker. Requires these environment variables: `LOKI_URL`, `LO
 
 **Data flow:** MySQL poll → group rows by (component, server_id, level) → format with nanosecond timestamps → POST JSON to Loki → update pointer file.
 
-**Loki labels** (indexed): `host`, `job`, `component`, `server_id`, `level`. **Structured metadata** (not indexed): `PID`, `file`, `line`.
+**Loki labels** (indexed): `host`, `job`, `component`, `server_id`, `level`. With `STRUCTURED_METADATA=true` (default): `PID`, `file`, `line` are sent as structured metadata (not indexed). With `STRUCTURED_METADATA=false`: `PID`, `file`, `line` are additional labels.
 
 **State persistence:** A pointer file stores the last processed `Logs.Id`. On first run with no pointer, backfills logs from the last N minutes.
 

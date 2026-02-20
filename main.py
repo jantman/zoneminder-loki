@@ -109,11 +109,15 @@ class ZmLokiShipper:
         self._pointer_path: str = os.environ.get(
             'POINTER_PATH', '/pointer.txt'
         )
+        self._structured_metadata: bool = os.environ.get(
+            'STRUCTURED_METADATA', 'true'
+        ).lower() in ('1', 'true', 'yes')
         self._pointer: int = -1
         logger.info(
             'Connecting to MySQL on %s as user %s and database name %s; '
-            'polling every %d seconds', db_host, db_user, db_name,
-            self._poll_interval
+            'polling every %d seconds; structured_metadata=%s',
+            db_host, db_user, db_name,
+            self._poll_interval, self._structured_metadata
         )
         self.conn: pymysql.Connection = pymysql.connect(
             host=db_host, user=db_user, password=db_pass, database=db_name,
@@ -141,6 +145,11 @@ class ZmLokiShipper:
             with open(self._pointer_path, 'r') as fh:
                 pointer = fh.read().strip()
             logger.debug('Pointer value: %s', pointer)
+            if not pointer:
+                logger.warning(
+                    'Pointer file %s exists but is empty', self._pointer_path
+                )
+                return None
             return int(pointer)
         except Exception as ex:
             logger.error(
@@ -231,21 +240,26 @@ class ZmLokiShipper:
         """
         streams: Dict[tuple, list] = defaultdict(list)
         for row in rows:
+            extra = (
+                ('PID', str(row['Pid'])),
+                ('file', str(row['File'])),
+                ('line', str(row['Line'])),
+            )
             labels: tuple = (
                 ('component', str(row['Component'])),
                 ('server_id', str(row['ServerId'])),
                 ('level', zm_level_name(row['Level'])),
             )
-            streams[labels].append([
+            if not self._structured_metadata:
+                labels = labels + extra
+            entry = [
                 # Loki needs a nanoseconds timestamp
                 str(int(row['TimeKey']) * 1000000000),
                 row['Message'],
-                {
-                    'PID': str(row['Pid']),
-                    'line': str(row['Line']),
-                    'file': str(row['File']),
-                }
-            ])
+            ]
+            if self._structured_metadata:
+                entry.append(dict(extra))
+            streams[labels].append(entry)
         data: dict = {'streams': []}
         for keys, vals in streams.items():
             data['streams'].append({
